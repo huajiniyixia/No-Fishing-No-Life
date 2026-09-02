@@ -1,5 +1,7 @@
 # No Fishing No Life
 
+> 在线试玩：[no-fishing-no-life.netlify.app](https://no-fishing-no-life.netlify.app)　|　GitHub：[huajiniyixia/No-Fishing-No-Life](https://github.com/huajiniyixia/No-Fishing-No-Life)
+
 本地离线 · 纯文字 · 发育 + 钓鱼 单机放置游戏
 
 > 单文件 HTML，手机 / 电脑浏览器均可玩，完全离线，无任何外部资源。
