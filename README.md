@@ -1,10 +1,28 @@
-# No Fishing No Life
+<div align="center">
+    <p>
+        <img src=image/h5logo.png alt="H5LOGO"><br>
+        Powered By HTML5<br>
+        <u>
+            <b>
+                No Fishing No Life
+            </b>
+        </u>
+        <br>
+        <i>
+            本地离线 · 纯文字 · 发育 + 钓鱼 单机放置游戏
+        </i>
+        <br>
+        <a href=https://no-fishing-no-life.netlify.app>
+            <img alt="Static Badge" src="https://img.shields.io/badge/%E4%B8%8D%E7%94%A8%E4%B8%8B%E8%BD%BD%EF%BC%8C%E7%82%B9%E5%87%BB%E5%8D%B3%E7%8E%A9-cyan?style=for-the-badge&logo=netlify&logoColor=black&logoSize=auto">
+        </a>
+    <img alt="GitHub License" src="https://img.shields.io/github/license/huajiniyixia/No-Fishing-No-Life?style=for-the-badge">
+    <img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/huajiniyixia/No-Fishing-No-Life?style=for-the-badge&color=yellow">
+    </p>
+</div>
 
-> 在线试玩：[no-fishing-no-life.netlify.app](https://no-fishing-no-life.netlify.app)　|　GitHub：[huajiniyixia/No-Fishing-No-Life](https://github.com/huajiniyixia/No-Fishing-No-Life)
 
-本地离线 · 纯文字 · 发育 + 钓鱼 单机放置游戏
+<!-- 在线试玩：[no-fishing-no-life.netlify.app](https://no-fishing-no-life.netlify.app)　|　GitHub：[huajiniyixia/No-Fishing-No-Life](https://github.com/huajiniyixia/No-Fishing-No-Life) -->
 
-> 单文件 HTML，手机 / 电脑浏览器均可玩，完全离线，无任何外部资源。
 
 ## 玩法简介
 
@@ -14,8 +32,9 @@
 - **摸鱼模式**：设置里一键把「钓」变「摸」（饵钓除外）。
 
 ## 快速上手
+[更新日志](whatsnew.md)
 
-双击 `index.html` 即可开始。主菜单「新游戏」先播放新手引导（点击任意处翻页、可跳过）。
+clone本项目到本地，双击 `index.html` 即可开始。主菜单「新游戏」先播放新手引导（点击任意处翻页、可跳过）。
 
 推荐路线：按工作流派特化加点 → 钓鱼赚钱升鱼竿到钻石鱼竿 → 全力开盒提属性、拉高工资 → 攒 1 亿金币买「屌炸天永恒鱼竿」毕业。
 
@@ -38,14 +57,3 @@
 - 自动保存在浏览器 localStorage，支持「手动存档 / 读档 / 导出 / 导入」（旧档自动补全新字段）。
 - 换设备：导出 JSON → 新设备导入即可。
 
-## 目录
-
-```
-No Fishing No Life/
-├── index.html            # 游戏本体（单文件）
-└── 钓鱼生活v1.1.0更新公告.md  # 更新公告
-```
-
-## 更新日志
-
-见 `钓鱼生活v1.1.0更新公告.md`。
