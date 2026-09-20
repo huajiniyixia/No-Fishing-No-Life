@@ -806,6 +806,7 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
       var b10 = document.createElement("button");
       b10.className = "nes-btn small";
       b10.textContent = "卖 10";
+      b10.disabled = n < 10;
       (function (rr) { b10.addEventListener("click", function () { sellCategory(rr, 10); }); })(r);
       var ball = document.createElement("button");
       ball.className = "nes-btn small is-primary";
