@@ -89,9 +89,8 @@ body.fs-large { font-size: 18px; }
 .stub-item { display: flex; justify-content: space-between; gap: 8px; padding: 6px 2px; border-bottom: 1px dashed var(--line); font-size: .9em; }
 .stub-item .tag { color: var(--muted); white-space: nowrap; }
 .stub-item .opts { display: flex; gap: 6px; align-items: center; }
-.info-dot { position: relative; display: inline-block; width: 18px; height: 18px; line-height: 13px; border: 2px solid var(--muted); border-radius: 50%; text-align: center; font-size: 12px; color: var(--muted); cursor: help; flex: 0 0 auto; margin-left: 6px; }
-.info-dot::after { content: attr(data-tip); position: absolute; left: 50%; bottom: calc(100% + 6px); transform: translateX(-50%); background: var(--panel2); color: var(--ink); border: 2px solid var(--ink); box-shadow: 0 4px 0 0 var(--shadow); padding: 6px 8px; font-size: 12px; line-height: 1.5; white-space: nowrap; max-width: 260px; z-index: 60; display: none; }
-.info-dot:hover::after { display: block; }
+.info-dot { position: relative; display: inline-block; width: 18px; height: 18px; line-height: 13px; border: 2px solid var(--muted); border-radius: 50%; text-align: center; font-size: 12px; color: var(--muted); cursor: pointer; flex: 0 0 auto; margin-left: 6px; }
+.tip-line { font-size: .85em; color: var(--muted); padding: 5px 2px; border-bottom: 1px dashed var(--line); line-height: 1.6; }
 .me-sub { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: bold; margin-top: 10px; padding-top: 6px; border-top: 2px dashed var(--line); }
 .ach-line { font-size: .85em; color: var(--muted); margin-top: 4px; line-height: 1.7; }
 button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
@@ -386,6 +385,32 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
     return pad(x.getHours()) + ":" + pad(x.getMinutes()) + ":" + pad(x.getSeconds());
   }
 
+  function makeDot(tip) {
+    var dot = document.createElement("span");
+    dot.className = "info-dot";
+    dot.textContent = "?";
+    dot.title = tip;
+    dot.setAttribute("data-tip", tip);
+    dot.addEventListener("click", function (ev) {
+      ev.stopPropagation();
+      var host = dot.parentNode;
+      while (host && host.parentNode && host.className && String(host.className).indexOf("stub-item") === -1 && String(host.className).indexOf("ach-row") === -1) {
+        host = host.parentNode;
+      }
+      if (!host || !host.parentNode) host = dot.parentNode;
+      var next = host.nextSibling;
+      if (next && next.className && String(next.className).indexOf("tip-line") !== -1) {
+        host.parentNode.removeChild(next);
+        return;
+      }
+      var line = document.createElement("div");
+      line.className = "tip-line";
+      line.textContent = "说明：" + tip;
+      host.parentNode.insertBefore(line, host.nextSibling);
+    });
+    return dot;
+  }
+
   // ================= 鱼竿品级（一品~五品） =================
   var GRADE_MAX = 5;
   var GRADE_FACTOR = [0.4, 0.8, 1.6, 3.2]; // 升到 2/3/4/5 品：鱼竿售价 × 系数
@@ -448,6 +473,35 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
     }
     return { count: n - left, eggValue: value };
   }
+  function fishRarity(name) {
+    for (var r in FISH) { if (FISH[r].indexOf(name) !== -1) return r; }
+    for (var i = 0; i < EGGS.length; i++) { if (EGGS[i].name === name) return "彩蛋"; }
+    return null;
+  }
+  function sellSpecies(name, want) {
+    if (!save) return;
+    var have = warehouseTotal(name);
+    if (have <= 0) { showToast("仓库里没有这种鱼"); return; }
+    var r = fishRarity(name);
+    var n = want <= 0 ? have : Math.min(want, have);
+    var value = r === "彩蛋" ? n * eggPriceOf(name) : sellBatchValue(r, n);
+    save.warehouse[name] = have - n;
+    save.gold = Math.round(save.gold + value);
+    addLog("出售 " + name + " ×" + n + "，收入 " + value + " 金币。");
+    if (r) {
+      bumpDaily("sell", r, n);
+      if (r !== "彩蛋") bumpDaily("sell", "任意", n);
+    }
+    earnDaily("fish", value);
+    checkAchievements();
+    persist();
+    updateTopBar();
+    renderWarehouse();
+    renderDaily();
+    renderRestaurant();
+    renderShopStub();
+    renderMe();
+  }
   function sellCategory(rarity, want) {
     if (!save) return;
     var have = rarityTotal(rarity);
@@ -468,6 +522,7 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
     renderWarehouse();
     renderDaily();
     renderRestaurant();
+    renderShopStub();
     renderMe();
   }
 
@@ -518,17 +573,48 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
       { key: "大傻", label: "大傻", score: 5, base: 1 },
       { key: "帕秋莉", label: "帕秋莉", score: 8, base: 1 }] }
   ];
+  function rarityCatchable(r) {
+    var w = WEIGHTS[save.fishing.rod] || WEIGHTS[0];
+    var idx = { "普通": 0, "彩蛋": 1, "稀有": 2, "史诗": 3, "传说": 4 }[r];
+    return idx === undefined ? true : w[idx] > 0;
+  }
+  function speciesCatchable(name) {
+    var r = fishRarity(name);
+    return r ? rarityCatchable(r) : true;
+  }
   function dailyFeasible(a, o) {
-    var rod = save.fishing.rod || 0;
     if (a === "open") {
       if ((save.bag[o] || 0) <= 0 && save.gold < 10000) return false;
     }
     if (a === "catch") {
-      var need = { "稀有": 1, "史诗": 2, "传说": 3 };
-      if ((need[o] || 0) > rod) return false;
+      var isRarity = ["普通", "稀有", "史诗", "传说", "彩蛋"].indexOf(o) !== -1;
+      if (isRarity ? !rarityCatchable(o) : !speciesCatchable(o)) return false;
     }
-    if (a === "sell" && o === "传说" && rod < 3) return false;
+    if (a === "sell" && o !== "任意") {
+      if (!rarityCatchable(o) && rarityTotal(o) <= 0) return false;
+    }
     return true;
+  }
+  function taskFeasibleNow(t) {
+    if (t.a === "catch") {
+      var isRarity = ["普通", "稀有", "史诗", "传说", "彩蛋"].indexOf(t.o) !== -1;
+      return isRarity ? rarityCatchable(t.o) : speciesCatchable(t.o);
+    }
+    if (t.a === "sell" && t.o !== "任意") return rarityCatchable(t.o) || rarityTotal(t.o) > 0;
+    return true;
+  }
+  function fixBlockedDaily() {
+    if (!save) return;
+    var dd = ensureDaily(), changed = false;
+    for (var i = 0; i < dd.tasks.length; i++) {
+      var t = dd.tasks[i];
+      if (t.claimed || t.done) continue;
+      if (!taskFeasibleNow(t)) {
+        var fresh = genDailyTasks();
+        if (fresh.length) { dd.tasks[i] = fresh[Math.floor(Math.random() * fresh.length)]; changed = true; }
+      }
+    }
+    if (changed) { persist(); renderDaily(); addLog("鱼竿更换后，已自动替换当前鱼竿无法完成的委托。"); }
   }
   function dailyTaskText(t) {
     if (t.a === "sign") return "完成当日签到";
@@ -617,6 +703,7 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
     persist();
     updateTopBar();
     renderDaily();
+    renderShopStub();
     renderMe();
   }
   function renderDaily() {
@@ -630,11 +717,7 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
       row.className = "stub-item";
       var left = document.createElement("span");
       left.textContent = dailyTaskText(t) + "（" + Math.min(t.prog, t.qty) + "/" + t.qty + "，评分 " + t.score + "）";
-      var dot = document.createElement("span");
-      dot.className = "info-dot";
-      dot.textContent = "?";
-      dot.title = "评分 = 动作分 + 对象分 + 数量分；奖励 = 1 万 +（评分 − 3）× 1 万，满分 20 额外 +2 万";
-      dot.setAttribute("data-tip", dot.title);
+      var dot = makeDot("评分 = 动作分 + 对象分 + 数量分；奖励 = 1 万 +（评分 − 3）× 1 万，满分 20 额外 +2 万");
       left.appendChild(dot);
       var btn = document.createElement("button");
       btn.className = "nes-btn small";
@@ -663,10 +746,15 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
     var kinds = 1 + Math.floor(Math.random() * 3);
     var items = [], guard = 0;
     while (items.length < kinds && guard++ < 60) {
+      var pool = [];
+      for (var pi = 0; pi < RARITY_PICK.length; pi++) {
+        if (rarityCatchable(RARITY_PICK[pi].r) || rarityTotal(RARITY_PICK[pi].r) > 0) pool.push(RARITY_PICK[pi]);
+      }
+      if (!pool.length) pool = RARITY_PICK.slice();
       var total = 0;
-      for (var i = 0; i < RARITY_PICK.length; i++) total += RARITY_PICK[i].w;
-      var roll = Math.floor(Math.random() * total), acc = 0, pick = RARITY_PICK[0];
-      for (var i = 0; i < RARITY_PICK.length; i++) { acc += RARITY_PICK[i].w; if (roll < acc) { pick = RARITY_PICK[i]; break; } }
+      for (var i = 0; i < pool.length; i++) total += pool[i].w;
+      var roll = Math.floor(Math.random() * total), acc = 0, pick = pool[0];
+      for (var i = 0; i < pool.length; i++) { acc += pool[i].w; if (roll < acc) { pick = pool[i]; break; } }
       var list = pick.r === "彩蛋" ? EGG_ALL : FISH[pick.r];
       var fish = list[Math.floor(Math.random() * list.length)];
       var dup = false;
@@ -724,6 +812,7 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
     updateTopBar();
     renderRestaurant();
     renderWarehouse();
+    renderShopStub();
     renderMe();
   }
   function rerollOrder(idx) {
@@ -745,11 +834,7 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
       var parts = [];
       for (var k = 0; k < o.items.length; k++) parts.push(o.items[k].fish + "×" + o.items[k].qty);
       left.textContent = parts.join(" + ") + "　难度 " + o.D + "　加成 x" + o.mult;
-      var dot = document.createElement("span");
-      dot.className = "info-dot";
-      dot.textContent = "?";
-      dot.title = "交付后按批量售价 ×" + o.mult + " 结算，另加固定 " + o.fixed + " 金币；难度 = 各稀有度分（普1/稀3/史6/传12/彩15）× 数量";
-      dot.setAttribute("data-tip", dot.title);
+      var dot = makeDot("交付后按批量售价 ×" + o.mult + " 结算，另加固定 " + o.fixed + " 金币；难度 = 各稀有度分（普1/稀3/史6/传12/彩15）× 数量");
       left.appendChild(dot);
       var ops = document.createElement("span");
       ops.className = "opts";
@@ -819,15 +904,36 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
       row.appendChild(ops);
       box.appendChild(row);
       var list = r === "彩蛋" ? EGG_ALL : FISH[r];
-      var parts = [];
       for (var k = 0; k < list.length; k++) {
-        var c = warehouseTotal(list[k]);
-        if (c > 0) parts.push(list[k] + "×" + c);
+        var fname = list[k];
+        var c = warehouseTotal(fname);
+        if (c <= 0) continue;
+        var srow = document.createElement("div");
+        srow.className = "stub-item";
+        var sl = document.createElement("span");
+        sl.textContent = "　" + fname + "×" + c + "（" + (r === "彩蛋" ? eggPriceOf(fname) + " 金币/条" : "单价 " + RARITY_RANGE[r][0] + "~" + RARITY_RANGE[r][1]) + "）";
+        var sops = document.createElement("span");
+        sops.className = "opts";
+        var s1 = document.createElement("button");
+        s1.className = "nes-btn small";
+        s1.textContent = "卖 1";
+        (function (ff) { s1.addEventListener("click", function () { sellSpecies(ff, 1); }); })(fname);
+        var s10 = document.createElement("button");
+        s10.className = "nes-btn small";
+        s10.textContent = "卖 10";
+        s10.disabled = c < 10;
+        (function (ff) { s10.addEventListener("click", function () { sellSpecies(ff, 10); }); })(fname);
+        var sall = document.createElement("button");
+        sall.className = "nes-btn small is-primary";
+        sall.textContent = "全卖";
+        (function (ff) { sall.addEventListener("click", function () { sellSpecies(ff, 0); }); })(fname);
+        sops.appendChild(s1);
+        sops.appendChild(s10);
+        sops.appendChild(sall);
+        srow.appendChild(sl);
+        srow.appendChild(sops);
+        box.appendChild(srow);
       }
-      var det = document.createElement("div");
-      det.className = "stub-item desc";
-      det.textContent = parts.join("　");
-      box.appendChild(det);
     }
   }
 
@@ -949,6 +1055,7 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
     renderDaily();
     renderRestaurant();
     renderMe();
+    fixBlockedDaily();
     refreshBaitButton();
     refreshFishButton();
   }
@@ -1238,6 +1345,7 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
     persist();
     updateTopBar();
     renderWorkPanel();
+    renderShopStub();
     renderMe();
   }
   function openResult(lines) {
@@ -1351,11 +1459,7 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
     srow.className = "stub-item";
     var sl = document.createElement("span");
     sl.textContent = "签到（每天 +1d100 金币）　累计 " + (save.stats.signDays || 0) + " 天";
-    var sdot = document.createElement("span");
-    sdot.className = "info-dot";
-    sdot.textContent = "?";
-    sdot.title = "每天一次，+1d100 金币（按本地日期，跨天刷新）";
-    sdot.setAttribute("data-tip", sdot.title);
+    var sdot = makeDot("每天一次，+1d100 金币（按本地日期，跨天刷新）");
     sl.appendChild(sdot);
     var sb = document.createElement("button");
     sb.className = "nes-btn small";
@@ -1371,12 +1475,7 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
       row.className = "stub-item";
       var left = document.createElement("span");
       left.textContent = j.name + "　" + j.formula;
-      var dot = document.createElement("span");
-      dot.className = "info-dot";
-      dot.textContent = "?";
-      var jtip = j.desc + "；当前属性下理论最高基础收入约 " + workMaxIncome(j.id) + " 金币（1d500 掷满，不含检定倍率）";
-      dot.title = jtip;
-      dot.setAttribute("data-tip", jtip);
+      var dot = makeDot(j.desc + "；当前属性下理论最高基础收入约 " + workMaxIncome(j.id) + " 金币（1d500 掷满，不含检定倍率）");
       left.appendChild(dot);
       var btn = document.createElement("button");
       btn.className = "nes-btn small";
@@ -1413,11 +1512,7 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
       row.className = "stub-item";
       var left = document.createElement("span");
       left.textContent = ROD_NAMES[i] + "　" + ROD_PRICES[i] + " 金币";
-      var dot = document.createElement("span");
-      dot.className = "info-dot";
-      dot.textContent = "?";
-      dot.title = ROD_DESC[i];
-      dot.setAttribute("data-tip", ROD_DESC[i]);
+      var dot = makeDot(ROD_DESC[i]);
       left.appendChild(dot);
       if (i === save.fishing.rod) left.textContent = gradeText(i, currentGrade()) + "　" + ROD_PRICES[i] + " 金币";
       var btn = document.createElement("button");
@@ -1453,11 +1548,7 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
       row.className = "stub-item";
       var left = document.createElement("span");
       left.textContent = it.name + "（鱼饵）　" + it.price + " 金币　持有 " + (save.fishing.baits[it.name] || 0);
-      var dot = document.createElement("span");
-      dot.className = "info-dot";
-      dot.textContent = "?";
-      dot.title = it.desc;
-      dot.setAttribute("data-tip", it.desc);
+      var dot = makeDot(it.desc);
       left.appendChild(dot);
       var btn = document.createElement("button");
       btn.className = "nes-btn small";
@@ -1479,11 +1570,7 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
       var left = document.createElement("span");
       var cur = save.fishing.blessings[kind] || 0;
       left.textContent = bless[i][1] + "　" + bless[i][2] + "　当前 " + cur + "/3 级";
-      var dot = document.createElement("span");
-      dot.className = "info-dot";
-      dot.textContent = "?";
-      dot.title = bless[i][3];
-      dot.setAttribute("data-tip", bless[i][3]);
+      var dot = makeDot(bless[i][3]);
       left.appendChild(dot);
       var btn = document.createElement("button");
       btn.className = "nes-btn small";
@@ -1510,11 +1597,7 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
       row2.className = "stub-item";
       var n = document.createElement("span");
       n.textContent = it.name + "　10000 金币　持有 " + (save.bag[it.key] || 0);
-      var dot = document.createElement("span");
-      dot.className = "info-dot";
-      dot.textContent = "?";
-      dot.title = it.desc;
-      dot.setAttribute("data-tip", it.desc);
+      var dot = makeDot(it.desc);
       n.appendChild(dot);
       var ops = document.createElement("span");
       ops.className = "opts";
@@ -1643,6 +1726,7 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
     save.gold -= price;
     save.fishing.rod = idx;
     save.fishing.grade = 1;
+    fixBlockedDaily();
     save.stats.fishSpend = (save.stats.fishSpend || 0) + price;
     addLog("购买鱼竿：" + ROD_NAMES[idx] + "（一品），花费 " + price + " 金币。");
     checkAchievements();
@@ -1747,11 +1831,7 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
       var left = document.createElement("span");
       left.className = done ? "done" : "todo";
       left.textContent = id + " " + ACH_NAMES[id] + (done ? "（已达成）" : "");
-      var dot = document.createElement("span");
-      dot.className = "info-dot";
-      dot.textContent = "?";
-      dot.title = ACH_COND[id];
-      dot.setAttribute("data-tip", ACH_COND[id]);
+      var dot = makeDot(ACH_COND[id]);
       left.appendChild(dot);
       var state = document.createElement("span");
       state.className = done ? "done" : "todo";
