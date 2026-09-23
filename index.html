@@ -218,7 +218,7 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
             <button class="nes-btn small" id="btn-restaurant">海钓餐馆</button>
           </div>
           <div id="daily-panel" class="hidden">
-            <div class="me-sub"><span data-plain="每日委托（每天 3 条，评分越高奖励越高）">每日委托（每天 3 条，评分越高奖励越高）</span></div>
+            <div class="me-sub"><span data-plain="每日委托（每天 3 条，评分越高奖励越高，可刷新）">每日委托（每天 3 条，评分越高奖励越高，可刷新）</span></div>
             <div id="daily-list"></div>
           </div>
           <div id="restaurant-panel" class="hidden">
@@ -310,10 +310,13 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
     { name: "大米", price: 1400, desc: "彩蛋大傻权重 +32000" },
     { name: "棒棒糖", price: 1000, desc: "彩蛋帕秋莉 +10，其余彩蛋 +500" }
   ];
+  var NET_CATCHES = 10;          // 每张渔网立即结算的钓鱼次数
+  var NET_COMMON_W = 10000000;   // 渔网结算的这 10 次内，普通鱼权重加成（结算后即恢复）
   var BLACK_ITEMS = [
-    { key: "box", name: "开盒（开启的潘多拉魔盒）", desc: "掷 1d8：1~6 属性+1d10；7~8 大成功/大失败（1d6 选属性）" },
-    { key: "magicBox", name: "魔盒（潘多拉魔盒）", desc: "抵消一次下次开盒的属性减小" },
-    { key: "container", name: "未知的集装箱", desc: "1~8 +1d20000；9 补回成本+1d10×10000；10 补回成本−1d10×10000（可欠钱）" }
+    { key: "box", name: "开盒（开启的潘多拉魔盒）", price: 10000, desc: "掷 1d8：1~6 属性+1d10；7~8 大成功/大失败（1d6 选属性）" },
+    { key: "magicBox", name: "魔盒（潘多拉魔盒）", price: 10000, desc: "抵消一次下次开盒的属性减小" },
+    { key: "container", name: "未知的集装箱", price: 10000, desc: "1~8 +1d20000；9 补回成本+1d10×10000；10 补回成本−1d10×10000（可欠钱）" },
+    { key: "net", name: "渔网（一次性）", price: 1000, desc: "使用后立即结算 " + NET_CATCHES + " 次钓鱼（这 " + NET_CATCHES + " 次内普通鱼权重 +" + NET_COMMON_W + "，结算后恢复；不消耗鱼饵、不占冷却）" }
   ];
   var FISH = {
     "普通": ["草鱼", "鲤鱼", "鲫鱼", "鲢鱼", "鳙鱼", "鳊鱼", "白条", "罗非鱼", "泥鳅", "黄鳝", "麦穗鱼", "河虾", "田螺", "河蚌", "鲶鱼", "黄颡鱼"],
@@ -342,7 +345,11 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
   ];
   var BM_KEYS = ["box", "magicBox", "container"];
   var BM_NAMES = ["开盒", "魔盒", "未知的集装箱"];
-  var BM_SHORT = { box: "开盒", magicBox: "魔盒", container: "集装箱" };
+  var BM_SHORT = { box: "开盒", magicBox: "魔盒", container: "集装箱", net: "渔网" };
+  function blackItemByKey(key) {
+    for (var i = 0; i < BLACK_ITEMS.length; i++) if (BLACK_ITEMS[i].key === key) return BLACK_ITEMS[i];
+    return null;
+  }
   var FISH_ALL = FISH["普通"].concat(FISH["稀有"]).concat(FISH["史诗"]).concat(FISH["传说"]);
   var EGG_ALL = EGGS.map(function (e) { return e.name; });
   var ACH_NAMES = {
@@ -417,6 +424,13 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
   function currentGrade() { return save && save.fishing.grade ? save.fishing.grade : 1; }
   function gradeText(rodIdx, grade) { return (grade > 1 ? grade + " 品 " : "") + ROD_NAMES[rodIdx]; }
   function gradeCost(rodIdx, nextGrade) { return Math.round(ROD_PRICES[rodIdx] * GRADE_FACTOR[nextGrade - 2]); }
+  // 品级说明（商店、钓鱼信息、我的 共用同一份文案）
+  function gradePerkText() {
+    return "每升 1 品：传说权重 +25、彩蛋权重 +3、黑市商品 1/2/3 权重各 +10，上钩时间 -0.3 秒";
+  }
+  function gradeHelpText() {
+    return gradePerkText() + "。升至二/三/四/五品分别花费该鱼竿售价 ×0.4 / ×0.8 / ×1.6 / ×3.2（上限 " + GRADE_MAX + " 品）；购买新鱼竿后品级重置为一品，已投入的升品费用不返还";
+  }
 
   // ================= 仓库与出售 =================
   var RARITY_ORDER = ["普通", "稀有", "史诗", "传说", "彩蛋"];
@@ -535,43 +549,43 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
   ];
   var DAILY_UNIT = { catch: "条", bait: "个", work: "次", open: "次", sell: "条", earn: "金币", sign: "" };
   var DAILY_ACTIONS = [
-    { key: "sign", label: "签到", score: 1, objects: [{ key: "sign", label: "当日签到", score: 1, base: 1 }] },
+    { key: "sign", label: "签到", score: 1, objects: [{ key: "sign", label: "当日签到", score: 1, base: 1, cap: 1 }] },
     { key: "bait", label: "使用", score: 2, objects: [
-      { key: "小鱼", label: "小鱼", score: 1, base: 3 },
-      { key: "大米", label: "大米", score: 2, base: 3 },
-      { key: "棒棒糖", label: "棒棒糖", score: 3, base: 3 }] },
+      { key: "小鱼", label: "小鱼", score: 1, base: 3, cap: 15 },
+      { key: "大米", label: "大米", score: 2, base: 3, cap: 10 },
+      { key: "棒棒糖", label: "棒棒糖", score: 3, base: 3, cap: 10 }] },
     { key: "work", label: "完成", score: 3, objects: [
-      { key: "any", label: "任意工作", score: 1, base: 2 },
-      { key: "1", label: "搬砖", score: 2, base: 2 },
-      { key: "4", label: "写文", score: 2, base: 2 },
-      { key: "3", label: "直播", score: 2, base: 2 },
-      { key: "2", label: "牛郎", score: 3, base: 2 },
-      { key: "5", label: "打架", score: 3, base: 2 },
-      { key: "6", label: "探险", score: 4, base: 2 }] },
+      { key: "any", label: "任意工作", score: 1, base: 2, cap: 5 },
+      { key: "1", label: "搬砖", score: 2, base: 2, cap: 5 },
+      { key: "4", label: "写文", score: 2, base: 2, cap: 5 },
+      { key: "3", label: "直播", score: 2, base: 2, cap: 5 },
+      { key: "2", label: "牛郎", score: 3, base: 2, cap: 5 },
+      { key: "5", label: "打架", score: 3, base: 2, cap: 5 },
+      { key: "6", label: "探险", score: 4, base: 2, cap: 5 }] },
     { key: "open", label: "开启", score: 4, objects: [
-      { key: "box", label: "开盒", score: 1, base: 1 },
-      { key: "container", label: "未知的集装箱", score: 3, base: 1 }] },
+      { key: "box", label: "开盒", score: 1, base: 1, cap: 3 },
+      { key: "container", label: "未知的集装箱", score: 3, base: 1, cap: 3 }] },
     { key: "earn", label: "赚取", score: 4, objects: [
-      { key: "fish", label: "钓鱼收入", score: 1, base: 5000, gold: true },
-      { key: "work", label: "工作收入", score: 2, base: 10000, gold: true },
-      { key: "all", label: "总收入", score: 4, base: 15000, gold: true }] },
+      { key: "fish", label: "钓鱼收入", score: 1, base: 5000, cap: 200000, gold: true },
+      { key: "work", label: "工作收入", score: 2, base: 10000, cap: 250000, gold: true },
+      { key: "all", label: "总收入", score: 4, base: 15000, cap: 400000, gold: true }] },
     { key: "sell", label: "出售", score: 5, objects: [
-      { key: "普通", label: "普通类鱼", score: 1, base: 5 },
-      { key: "任意", label: "任意类鱼", score: 1, base: 5 },
-      { key: "稀有", label: "稀有类鱼", score: 2, base: 3 },
-      { key: "史诗", label: "史诗类鱼", score: 4, base: 2 },
-      { key: "彩蛋", label: "彩蛋类鱼", score: 5, base: 1 },
-      { key: "传说", label: "传说类鱼", score: 6, base: 1 }] },
+      { key: "普通", label: "普通类鱼", score: 1, base: 5, cap: 40 },
+      { key: "任意", label: "任意类鱼", score: 1, base: 5, cap: 40 },
+      { key: "稀有", label: "稀有类鱼", score: 2, base: 3, cap: 20 },
+      { key: "史诗", label: "史诗类鱼", score: 4, base: 2, cap: 10 },
+      { key: "彩蛋", label: "彩蛋类鱼", score: 5, base: 1, cap: 5 },
+      { key: "传说", label: "传说类鱼", score: 6, base: 1, cap: 3 }] },
     { key: "catch", label: "钓到", score: 6, objects: [
-      { key: "普通", label: "普通鱼", score: 1, base: 8 },
-      { key: "稀有", label: "稀有鱼", score: 2, base: 4 },
-      { key: "史诗", label: "史诗鱼", score: 4, base: 2 },
-      { key: "彩蛋", label: "彩蛋鱼（任意）", score: 5, base: 1 },
-      { key: "传说", label: "传说鱼", score: 6, base: 1 },
-      { key: "烤激光鱼", label: "烤激光鱼", score: 4, base: 1 },
-      { key: "琪露诺", label: "琪露诺", score: 4, base: 1 },
-      { key: "大傻", label: "大傻", score: 5, base: 1 },
-      { key: "帕秋莉", label: "帕秋莉", score: 8, base: 1 }] }
+      { key: "普通", label: "普通鱼", score: 1, base: 8, cap: 60 },
+      { key: "稀有", label: "稀有鱼", score: 2, base: 4, cap: 30 },
+      { key: "史诗", label: "史诗鱼", score: 4, base: 2, cap: 10 },
+      { key: "彩蛋", label: "彩蛋鱼（任意）", score: 5, base: 1, cap: 10 },
+      { key: "传说", label: "传说鱼", score: 6, base: 1, cap: 5 },
+      { key: "烤激光鱼", label: "烤激光鱼", score: 4, base: 1, cap: 3 },
+      { key: "琪露诺", label: "琪露诺", score: 4, base: 1, cap: 3 },
+      { key: "大傻", label: "大傻", score: 5, base: 1, cap: 3 },
+      { key: "帕秋莉", label: "帕秋莉", score: 8, base: 1, cap: 1 }] }
   ];
   function rarityCatchable(r) {
     var w = WEIGHTS[save.fishing.rod] || WEIGHTS[0];
@@ -628,7 +642,7 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
       for (var j = 0; j < a.objects.length; j++) {
         var o = a.objects[j];
         if (!dailyFeasible(a.key, o.key)) continue;
-        pool.push({ a: a.key, aLabel: a.label, aScore: a.score, o: o.key, oLabel: o.label, oScore: o.score, base: o.base, gold: !!o.gold });
+        pool.push({ a: a.key, aLabel: a.label, aScore: a.score, o: o.key, oLabel: o.label, oScore: o.score, base: o.base, cap: o.cap || 0, gold: !!o.gold });
       }
     }
     var picks = [], guard = 0;
@@ -641,6 +655,7 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
       var rod = save.fishing.rod || 0;
       var scale = cand.gold ? (1 + rod) : (1 + Math.floor(rod / 2));
       var qty = Math.max(1, Math.round(cand.base * tier.mult * scale));
+      if (cand.cap > 0 && qty > cand.cap) qty = cand.cap; // 数量上限：避免出现「每天工作 24 次」这类不可能任务
       var score = cand.aScore + cand.oScore + tier.score;
       var reward = 10000 + (score - 3) * 10000 + (score >= 20 ? 20000 : 0);
       picks.push({ a: cand.a, aLabel: cand.aLabel, o: cand.o, oLabel: cand.oLabel, tier: tier.label, qty: qty, score: score, reward: reward, prog: 0, done: false, claimed: false });
@@ -653,6 +668,30 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
       save.daily = { date: today, tasks: genDailyTasks(), chest: false };
     }
     return save.daily;
+  }
+  // 刷新单条委托：换一条（与另外两条不重复）的可行委托，不限次数
+  function rerollDaily(idx) {
+    if (!save) return;
+    var dd = ensureDaily();
+    var t = dd.tasks[idx];
+    if (!t || t.claimed) return;
+    if (t.done) { showToast("已完成的委托请直接领取"); return; }
+    var fresh = null, guard = 0;
+    while (!fresh && guard++ < 60) {
+      var picks = genDailyTasks();
+      for (var i = 0; i < picks.length; i++) {
+        var dup = false;
+        for (var k = 0; k < dd.tasks.length; k++) {
+          if (k !== idx && dd.tasks[k].a === picks[i].a && dd.tasks[k].o === picks[i].o) dup = true;
+        }
+        if (!dup) { fresh = picks[i]; break; }
+      }
+    }
+    if (!fresh) { showToast("暂时没有可替换的委托"); return; }
+    dd.tasks[idx] = fresh;
+    addLog("刷新委托：" + dailyTaskText(fresh));
+    persist();
+    renderDaily();
   }
   function bumpDaily(action, key, amount) {
     if (!save) return;
@@ -711,14 +750,25 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
     if (!box || !save) return;
     var dd = ensureDaily();
     box.innerHTML = "";
+    var head = document.createElement("div");
+    head.className = "ach-line";
+    head.textContent = "遇到做不完的委托，点「刷新」即可换一条，不限次数（每日 3 条的数量档按鱼竿进度放大，但有上限，不会出现做不完的任务）。";
+    box.appendChild(head);
     for (var i = 0; i < dd.tasks.length; i++) {
       var t = dd.tasks[i];
       var row = document.createElement("div");
       row.className = "stub-item";
       var left = document.createElement("span");
       left.textContent = dailyTaskText(t) + "（" + Math.min(t.prog, t.qty) + "/" + t.qty + "，评分 " + t.score + "）";
-      var dot = makeDot("评分 = 动作分 + 对象分 + 数量分；奖励 = 1 万 +（评分 − 3）× 1 万，满分 20 额外 +2 万");
+      var dot = makeDot("评分 = 动作分 + 对象分 + 数量分；奖励 = 1 万 +（评分 − 3）× 1 万，满分 20 额外 +2 万。刷新不限次数，直到换到你能做的委托为止");
       left.appendChild(dot);
+      var ops = document.createElement("span");
+      ops.className = "opts";
+      var rbtn = document.createElement("button");
+      rbtn.className = "nes-btn small";
+      rbtn.textContent = "刷新";
+      rbtn.disabled = t.claimed || t.done;
+      (function (k) { rbtn.addEventListener("click", function () { rerollDaily(k); }); })(i);
       var btn = document.createElement("button");
       btn.className = "nes-btn small";
       if (t.claimed) { btn.textContent = "已领取"; btn.disabled = true; }
@@ -727,8 +777,10 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
         btn.className = "nes-btn small is-primary";
         (function (k) { btn.addEventListener("click", function () { claimDaily(k); }); })(i);
       } else { btn.textContent = "进行中"; btn.disabled = true; }
+      ops.appendChild(rbtn);
+      ops.appendChild(btn);
       row.appendChild(left);
-      row.appendChild(btn);
+      row.appendChild(ops);
       box.appendChild(row);
     }
   }
@@ -975,7 +1027,7 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
       player: { nickname: nick || "钓客", createdAt: Date.now(), attrs: attrs },
       gold: 100,
       stats: { workCount: 0, fishCount: 0, signDays: 0, boxOpen: 0, container: 0, explore: 0, fishSpend: 0, workPerJob: {}, dailyDone: 0, restaurantDone: 0 },
-      bag: { box: 0, magicBox: 0, container: 0 },
+      bag: { box: 0, magicBox: 0, container: 0, net: 0 },
       fishing: { rod: 0, grade: 1, baits: { "小鱼": 0, "大米": 0, "棒棒糖": 0 }, activeBait: null, blessings: { "饵钓": 0, "海之眷顾": 0 }, codex: [], countByRarity: {} },
       warehouse: {},
       daily: null,
@@ -1011,10 +1063,11 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
     s.warehouse = s.warehouse || {};
     s.restaurant = Array.isArray(s.restaurant) ? s.restaurant : [];
     if (!s.daily || typeof s.daily !== "object") s.daily = null;
-    s.bag = Object.assign({ box: 0, magicBox: 0, container: 0 }, s.bag || {});
+    s.bag = Object.assign({ box: 0, magicBox: 0, container: 0, net: 0 }, s.bag || {});
     s.fishing = Object.assign({ rod: 0, grade: 1, baits: { "小鱼": 0, "大米": 0, "棒棒糖": 0 }, activeBait: null, blessings: { "饵钓": 0, "海之眷顾": 0 }, codex: [], countByRarity: {} }, s.fishing || {});
     if (!s.fishing.grade || s.fishing.grade < 1 || s.fishing.grade > 5) s.fishing.grade = 1;
     if (!(s.fishing.activeBait in s.fishing.baits) || s.fishing.baits[s.fishing.activeBait] <= 0) s.fishing.activeBait = null;
+    delete s.fishing.netLeft; // v1.2.1 调整：渔网改为立即结算，不再需要剩余次数
     s.timers = {
       lastWork: typeof t.lastWork === "number" ? t.lastWork : 0,
       lastLive: t.lastLive || 0,
@@ -1222,6 +1275,8 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
     if (!save) return;
     var rows = [
       ["当前鱼竿", gradeText(save.fishing.rod, currentGrade())],
+      ["鱼竿品级", currentGrade() + " / " + GRADE_MAX + " 品"],
+      ["品级效果", gradePerkText()],
       ["累计钓鱼", save.stats.fishCount + " 次"],
       ["图鉴", save.fishing.codex.length + " / 50 种"],
       ["当前鱼饵", save.fishing.activeBait ? save.fishing.activeBait + "×" + (save.fishing.baits[save.fishing.activeBait] || 0) : "无"],
@@ -1511,24 +1566,27 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
       var row = document.createElement("div");
       row.className = "stub-item";
       var left = document.createElement("span");
-      left.textContent = ROD_NAMES[i] + "　" + ROD_PRICES[i] + " 金币";
-      var dot = makeDot(ROD_DESC[i]);
+      var curRod = i === save.fishing.rod;
+      left.textContent = (curRod ? gradeText(i, currentGrade()) : ROD_NAMES[i]) + "　" + ROD_PRICES[i] + " 金币";
+      var dot = makeDot(curRod ? ROD_DESC[i] + "。当前品级 " + currentGrade() + " / " + GRADE_MAX + "，" + gradePerkText() : ROD_DESC[i]);
       left.appendChild(dot);
-      if (i === save.fishing.rod) left.textContent = gradeText(i, currentGrade()) + "　" + ROD_PRICES[i] + " 金币";
       var btn = document.createElement("button");
       btn.className = "nes-btn small";
       if (i === save.fishing.rod) {
         if (currentGrade() >= GRADE_MAX) {
           btn.textContent = "已满品";
+          btn.title = gradeHelpText();
           btn.disabled = true;
         } else {
           var gcost = gradeCost(i, currentGrade() + 1);
           btn.textContent = "升 " + (currentGrade() + 1) + " 品 " + gcost;
+          btn.title = gradeHelpText();
           btn.disabled = save.gold < gcost;
           btn.addEventListener("click", buyGrade);
         }
       } else if (i === save.fishing.rod + 1) {
         btn.textContent = "购买";
+        btn.title = ROD_DESC[i] + "。购买后品级重置为一品";
         btn.disabled = save.gold < ROD_PRICES[i];
         (function (idx) {
           btn.addEventListener("click", function () { buyRod(idx); });
@@ -1541,6 +1599,22 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
       row.appendChild(btn);
       fs.appendChild(row);
     }
+    // 鱼竿品级说明行：按钮旁把「升品能带来什么、怎么算钱」写清楚
+    var gradeRow = document.createElement("div");
+    gradeRow.className = "stub-item";
+    var gradeLeft = document.createElement("span");
+    gradeLeft.textContent = "鱼竿品级　当前 " + currentGrade() + " / " + GRADE_MAX + " 品";
+    gradeLeft.appendChild(makeDot(gradeHelpText()));
+    var gradeOps = document.createElement("span");
+    gradeOps.className = "opts";
+    var gradeTag = document.createElement("span");
+    gradeTag.className = "tag";
+    if (currentGrade() >= GRADE_MAX) gradeTag.textContent = "已满品（" + GRADE_MAX + " 品）";
+    else gradeTag.textContent = "下一品：" + (currentGrade() + 1) + " 品，需 " + gradeCost(save.fishing.rod, currentGrade() + 1) + " 金币";
+    gradeOps.appendChild(gradeTag);
+    gradeRow.appendChild(gradeLeft);
+    gradeRow.appendChild(gradeOps);
+    fs.appendChild(gradeRow);
     // 鱼饵
     for (var i = 0; i < BAITS.length; i++) {
       var it = BAITS[i];
@@ -1596,7 +1670,7 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
       var row2 = document.createElement("div");
       row2.className = "stub-item";
       var n = document.createElement("span");
-      n.textContent = it.name + "　10000 金币　持有 " + (save.bag[it.key] || 0);
+      n.textContent = it.name + "　" + it.price + " 金币　持有 " + (save.bag[it.key] || 0);
       var dot = makeDot(it.desc);
       n.appendChild(dot);
       var ops = document.createElement("span");
@@ -1604,7 +1678,7 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
       var buyBtn = document.createElement("button");
       buyBtn.className = "nes-btn small";
       buyBtn.textContent = "购买";
-      buyBtn.disabled = save.gold < 10000;
+      buyBtn.disabled = save.gold < it.price;
       (function (key, b) {
         b.addEventListener("click", function () { buyBlackItem(key); });
       })(it.key, buyBtn);
@@ -1631,10 +1705,12 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
   }
   function buyBlackItem(key) {
     if (!save) return;
-    if (save.gold < 10000) { showToast("金币不足"); return; }
-    save.gold = r2(save.gold - 10000);
+    var item = blackItemByKey(key);
+    if (!item) return;
+    if (save.gold < item.price) { showToast("金币不足"); return; }
+    save.gold = Math.round(save.gold - item.price);
     save.bag[key] = (save.bag[key] || 0) + 1;
-    addLog("购买黑市商品：" + BM_SHORT[key] + "，花费 10000 金币。");
+    addLog("购买黑市商品：" + BM_SHORT[key] + "，花费 " + item.price + " 金币。");
     checkAchievements();
     persist();
     updateTopBar();
@@ -1647,6 +1723,40 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
     save.bag[key]--;
     if (key === "box") openBox();
     else if (key === "container") containerGamble();
+    else if (key === "net") useNet();
+  }
+  // 渔网：立即结算 10 次钓鱼（按当前出货概率一次性入账，不消耗鱼饵、不占冷却）
+  function useNet() {
+    if (!save) return;
+    var count = {}, order = [];
+    for (var i = 0; i < NET_CATCHES; i++) {
+      var plan = planCatch(true); // 这 10 次内普通鱼权重 +NET_COMMON_W，之后自动恢复
+      var label = planLabel(plan);
+      if (!count[label]) { count[label] = 0; order.push(label); }
+      count[label]++;
+      settlePlan(plan);
+    }
+    var parts = [];
+    for (var k = 0; k < order.length; k++) parts.push(order[k] + "×" + count[order[k]]);
+    var summary = parts.join("　");
+    var lines = [
+      "撒下渔网，立即结算 " + NET_CATCHES + " 次钓鱼：",
+      summary,
+      "这 " + NET_CATCHES + " 次内普通鱼权重额外 +" + NET_COMMON_W + "（结算结束即恢复，不影响后续抛竿概率）。"
+    ];
+    addLog("使用渔网，立即结算 " + NET_CATCHES + " 次钓鱼：" + summary + "。");
+    checkAchievements();
+    persist();
+    updateTopBar();
+    renderFishInfo();
+    renderShopStub();
+    renderWarehouse();
+    renderRestaurant();
+    renderDaily();
+    renderMe();
+    refreshFishButton();
+    refreshBaitButton();
+    openResult(lines);
   }
   function openBox() {
     if (!save) return;
@@ -1910,9 +2020,10 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
     rows.push(["图鉴", save.fishing.codex.length + " / 50 种"]);
     rows.push(["成就", save.achievements.length + " / " + ACH_TOTAL]);
     rows.push(["当前鱼竿", ROD_NAMES[save.fishing.rod] || "初始鱼竿"]);
+    rows.push(["鱼竿品级", currentGrade() + " / " + GRADE_MAX + " 品" + (currentGrade() < GRADE_MAX ? "（升下一品需 " + gradeCost(save.fishing.rod, currentGrade() + 1) + " 金币，在商店页升品）" : "（已满品）")]);
     rows.push(["鱼饵数量", "小鱼 " + save.fishing.baits["小鱼"] + " / 大米 " + save.fishing.baits["大米"] + " / 棒棒糖 " + save.fishing.baits["棒棒糖"]]);
     rows.push(["祝福", "饵钓 " + save.fishing.blessings["饵钓"] + " 级 / 海之眷顾 " + save.fishing.blessings["海之眷顾"] + " 级"]);
-    rows.push(["黑市商店", "开盒 " + save.bag.box + " / 魔盒 " + save.bag.magicBox + " / 集装箱 " + save.bag.container]);
+    rows.push(["黑市商店", "开盒 " + save.bag.box + " / 魔盒 " + save.bag.magicBox + " / 集装箱 " + save.bag.container + " / 渔网 " + (save.bag.net || 0)]);
     var whTotal = 0;
     for (var ri = 0; ri < RARITY_ORDER.length; ri++) whTotal += rarityTotal(RARITY_ORDER[ri]);
     rows.push(["仓库", "存鱼 " + whTotal + " 条"]);
@@ -2136,7 +2247,8 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
     if (rarity === "传说") return d(1000) + 500;
     return 0;
   }
-  function effectiveWeights() {
+  // netBonus = true 时表示本次是渔网结算（这 10 次内普通鱼 +NET_COMMON_W）
+  function effectiveWeights(netBonus) {
     var w = (WEIGHTS[save.fishing.rod] || WEIGHTS[0]).slice();
     var hz = save.fishing.blessings["海之眷顾"] || 0;
     if (hz > 0) {
@@ -2148,6 +2260,7 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
     if (save.fishing.activeBait === "棒棒糖") w[1] += 1510;    // 棒棒糖：帕秋莉+10、其余彩蛋+500
     var g = currentGrade() - 1;                                 // 品级加成：每品 传说+25、彩蛋+3、黑市各+10
     if (g > 0) { w[1] += 3 * g; w[4] += 25 * g; w[5] += 10 * g; w[6] += 10 * g; w[7] += 10 * g; }
+    if (netBonus) w[0] += NET_COMMON_W;                         // 渔网：仅这 10 次结算内普通鱼权重 +32000
     return w;
   }
   function pickEgg() {
@@ -2169,8 +2282,8 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
     for (var i = 0; i < 4; i++) { acc += w[i]; if (r < acc) return i; }
     return 0;
   }
-  function pickCatchKind() {
-    var w = effectiveWeights();
+  function pickCatchKind(netBonus) {
+    var w = effectiveWeights(netBonus);
     var total = w[0] + w[1] + w[2] + w[3] + w[4] + w[5] + w[6] + w[7];
     var r = Math.floor(Math.random() * total);
     var acc = 0;
@@ -2197,8 +2310,8 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
     }
     return c;
   }
-  function planCatch() {
-    var kind = pickCatchKind();
+  function planCatch(netBonus) {
+    var kind = pickCatchKind(netBonus);
     var plan = { kind: kind };
     if (kind >= 5 && kind <= 7) {
       plan.bmIdx = kind - 5;
@@ -2211,6 +2324,33 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
     return plan;
   }
   // 上钩时间按稀有度递增：普通16s 稀有17s 史诗18s 传说19s 彩蛋20s 黑市21s
+  // 结算一次渔获：入库 + 图鉴 + 委托进度，返回日志文案
+  function settlePlan(plan) {
+    var msg = "";
+    if (plan.kind >= 5 && plan.kind <= 7) {
+      save.bag[BM_KEYS[plan.bmIdx]] = (save.bag[BM_KEYS[plan.bmIdx]] || 0) + 1;
+      msg = "你钓到了一个黑市商品：" + BM_NAMES[plan.bmIdx] + "（已存入黑市商店，商店页可查看/使用）";
+    } else if (plan.kind === 1) {
+      addCodex(plan.egg.name);
+      addWarehouse(plan.egg.name, 1);
+      bumpDaily("catch", plan.egg.name, 1);
+      bumpDaily("catch", "彩蛋", 1);
+      msg = "你钓到了一条彩蛋鱼 " + plan.egg.name + "，已存入仓库（单价 " + plan.egg.price + " 金币）";
+    } else {
+      addCodex(plan.fish);
+      addWarehouse(plan.fish, 1);
+      bumpDaily("catch", plan.rarity, 1);
+      bumpDaily("catch", plan.fish, 1);
+      msg = "你钓到了一条" + plan.rarity + "鱼 " + plan.fish + "，已存入仓库";
+    }
+    save.stats.fishCount = (save.stats.fishCount || 0) + 1;
+    return msg;
+  }
+  function planLabel(plan) {
+    if (plan.kind >= 5 && plan.kind <= 7) return "黑市商品·" + BM_NAMES[plan.bmIdx];
+    if (plan.kind === 1) return plan.egg.name;
+    return plan.fish;
+  }
   function hookMsFor(plan) {
     if (plan.kind >= 5 && plan.kind <= 7) return 21000;
     if (plan.kind === 1) return 20000;
@@ -2236,6 +2376,9 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
     save.timers.hook = { startedAt: now, finishAt: now + wait, plan: plan };
     addLog(baitName ? "正在钓鱼……（消耗鱼饵：" + baitName + "）" : "正在钓鱼……");
     persist();
+    renderFishInfo();
+    renderShopStub();
+    renderMe();
     refreshFishButton();
     refreshBaitButton();
   }
@@ -2245,34 +2388,18 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
     var caughtAt = hk.finishAt || Date.now();
     save.timers.hook = null;
     var plan = hk.plan || planCatch();
-    var msg = "";
-    if (plan.kind >= 5 && plan.kind <= 7) {
-      save.bag[BM_KEYS[plan.bmIdx]] = (save.bag[BM_KEYS[plan.bmIdx]] || 0) + 1;
-      msg = "你钓到了一个黑市商品：" + BM_NAMES[plan.bmIdx] + "（已存入黑市商店，商店页可查看/使用）";
-    } else if (plan.kind === 1) {
-      addCodex(plan.egg.name);
-      addWarehouse(plan.egg.name, 1);
-      bumpDaily("catch", plan.egg.name, 1);
-      bumpDaily("catch", "彩蛋", 1);
-      msg = "你钓到了一条彩蛋鱼 " + plan.egg.name + "，已存入仓库（单价 " + plan.egg.price + " 金币）";
-    } else {
-      addCodex(plan.fish);
-      addWarehouse(plan.fish, 1);
-      bumpDaily("catch", plan.rarity, 1);
-      bumpDaily("catch", plan.fish, 1);
-      msg = "你钓到了一条" + plan.rarity + "鱼 " + plan.fish + "，已存入仓库";
-    }
-    save.stats.fishCount = (save.stats.fishCount || 0) + 1;
+    addLog(settlePlan(plan));
     save.timers.fishCooldownUntil = caughtAt + 10000;
-    addLog(msg);
     checkAchievements();
     persist();
     updateTopBar();
     renderFishInfo();
+    renderShopStub();
     renderWarehouse();
     renderRestaurant();
     renderMe();
     refreshFishButton();
+    refreshBaitButton();
   }
   function openBaitMenu() {
     if (!save) { showToast("请先建号"); return; }
@@ -2379,8 +2506,8 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
     { title: "工作界面演示", mock: "work", desc: "「工作」页：每天可签到一次 +1d100 金币；六种工作共用 1 小时冷却，收益由你的基础属性决定。接下来会逐一介绍六种工作的工资公式、属性要求与效果，方便你选择开局流派。" },
     { title: "工作详解：六种工作", mock: "jobs", desc: "六种工作共用 1 小时冷却，收益基于基础属性、掷 1d500：\n搬砖：(力+体)x1d500/8，主属性 力量/体质，无风险，累计加成最高 x1.25；\n牛郎：(技x0.5+魅x0.9)x1d500/6，主属性 技巧/魅力，魅力检定 1d200 通过再获黑市商品 1 件；\n直播：(智+魅)x1d500/8，主属性 智力/魅力，2 小时内连续直播 x1.3；\n写文：(技+智)x1d500/9，主属性 技巧/智力，意志检定通过 x1.3；\n打架：(力+体)x1d500/6，主属性 力量/体质，力量检定通过 x1.5、失败 x0.5；\n探险：(1d100-50)x300，属性通用，50% 归 0、30% 触发事件（属性提升/黑市商品/金钱/奇遇）。\n游戏内悬停每个工作旁的问号，可查看完整说明与当前属性下的理论最高收入。" },
     { title: "仓库与出售", mock: "warehouse", desc: "鱼获不再即时卖钱，而是自动存入「仓库」，按普通/稀有/史诗/传说/彩蛋五类存放。出售沿用原价公式，批量出售 = 保底×数量 + 1d(上限×数量)（例：10 条稀有 = 1000 + 1d2000，即 1001~3000）。仓库支持「卖 1 / 卖 10 / 全卖」，餐馆订单会按鱼种扣鱼。" },
-    { title: "商店与鱼竿品级", mock: "shop", desc: "钓鱼商店买鱼竿、鱼饵与祝福（饵钓缩短上钩时间、海之眷顾提高彩蛋率）；鱼竿可像修仙一样炼化品级：一品到五品，每品提升传说/彩蛋/黑市权重并缩短上钩时间，费用为鱼竿售价的 0.4/0.8/1.6/3.2 倍。黑市商店买开盒（提升属性）、魔盒（抵消属性减小）、集装箱（赌钱：1~8 稳赚、9/10 补回成本后 ±1d10×10000）。" },
-    { title: "每日委托与海钓餐馆", mock: "daily", desc: "「工作」页有两个入口：每日委托（每天 3 条，动作×对象×数量组合，评分 = 动作分 + 对象分 + 数量分，奖励 1 万 +（评分−3）×1 万，满分 20 额外 +2 万，三条全清有宝箱）；海钓餐馆（不设每日上限，交付鱼种组合后立即刷新新订单，收益 = 该批鱼售价 ×1.3~2.0 + 固定金币）。" },
+    { title: "商店与鱼竿品级", mock: "shop", desc: "钓鱼商店买鱼竿、鱼饵与祝福（饵钓缩短上钩时间、海之眷顾提高彩蛋率）；鱼竿可像修仙一样炼化品级：一品到五品，" + gradePerkText() + "，升至二/三/四/五品分别花费该鱼竿售价 ×0.4 / ×0.8 / ×1.6 / ×3.2，购买新鱼竿后品级重置为一品（商店页对应位置有「鱼竿品级」说明行与问号可随时查看）。黑市商店买开盒（提升属性）、魔盒（抵消属性减小）、集装箱（赌钱：1~8 稳赚、9/10 补回成本后 ±1d10×10000）、渔网（1000 金币：立即结算 " + NET_CATCHES + " 次钓鱼，这 " + NET_CATCHES + " 次内普通鱼权重 +" + NET_COMMON_W + "，结算后恢复；不消耗鱼饵、不占冷却）。" },
+    { title: "每日委托与海钓餐馆", mock: "daily", desc: "「工作」页有两个入口：每日委托（每天 3 条，动作×对象×数量组合，评分 = 动作分 + 对象分 + 数量分，奖励 1 万 +（评分−3）×1 万，满分 20 额外 +2 万，三条全清有宝箱；任务数量设有上限，做不完的可以随时点「刷新」换掉，不限次数）；海钓餐馆（不设每日上限，交付鱼种组合后立即刷新新订单，收益 = 该批鱼售价 ×1.3~2.0 + 固定金币）。" },
     { title: "推荐发育路线", mock: "road", desc: "建议开局按工作流派特化加点；钓鱼攒钱并靠仓库/餐馆放大收益，逐步升级鱼竿并炼化品级；用工作与开盒把属性堆高（属性越高工资越高）；最后冲刺 1 亿金币买下「屌炸天永恒鱼竿」毕业。" }
   ];
   var guideIndex = 0;
@@ -2427,7 +2554,7 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
     } else if (kind === "shop") {
       html = "<div class='mock-row'><span>我的</span><span>钱包：100</span></div>" +
         "<div class='mock-row'><span>钓鱼商店（鱼竿/鱼饵/祝福）</span><span class='mock-chip'>购买</span></div>" +
-        "<div class='mock-row'><span>黑市商店（开盒/魔盒/集装箱）</span><span class='mock-chip'>购买</span></div>" +
+        "<div class='mock-row'><span>黑市商店（开盒/魔盒/集装箱/渔网）</span><span class='mock-chip'>购买</span></div>" +
         "<div class='mock-tab'><span>钓鱼</span><span>工作</span><span class='on'>商店</span><span>我的</span></div>";
     } else if (kind === "warehouse") {
       html = "<div class='mock-row'><span>普通类 128 条</span><span class='mock-chip'>卖 10</span></div>" +
@@ -2436,7 +2563,7 @@ textarea.save-area { width: 100%; min-height: 130px; background: var(--panel2); 
         "<div class='mock-tab'><span>钓鱼</span><span>工作</span><span>商店</span><span class='on'>仓库</span><span>我的</span></div>";
     } else if (kind === "daily") {
       html = "<div class='mock-row'><span>钓到 稀有鱼 12 条（评分 13）</span><span class='mock-chip on'>领取 110000</span></div>" +
-        "<div class='mock-row'><span>完成 探险 4 次（评分 11）</span><span class='mock-chip off'>进行中</span></div>" +
+        "<div class='mock-row'><span>完成 探险 4 次（评分 11）</span><span class='mock-chip'>刷新</span></div>" +
         "<div class='mock-row'><span>餐馆订单：草鱼×3 + 鲤鱼×2（难度 5）</span><span class='mock-chip'>交付</span></div>";
     } else if (kind === "jobs") {
       html = "<div class='mock-row'><span>搬砖　(力+体)x1d500/8</span><span class='mock-chip'>力/体</span></div>" +
